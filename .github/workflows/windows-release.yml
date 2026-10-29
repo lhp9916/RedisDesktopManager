@@ -243,18 +243,6 @@ jobs:
             Pop-Location
           }
 
-          $qtRoot = Split-Path (Split-Path (Get-Command qmake).Source -Parent) -Parent
-          $qmlSource = Join-Path $qtRoot "qml"
-          if (-not (Test-Path -LiteralPath $qmlSource)) {
-            Write-Output "::error title=Qt deployment failed::Qt QML modules were not installed"
-            exit 1
-          }
-
-          Get-ChildItem (Join-Path $qtRoot "bin") -Filter "Qt5*.dll" -File |
-            Copy-Item -Destination $stage -Force
-          New-Item -ItemType Directory -Path "$stage\qml" -Force | Out-Null
-          Copy-Item "$qmlSource\*" "$stage\qml" -Recurse -Force
-
       - name: Verify deployment
         shell: pwsh
         run: |
@@ -264,7 +252,10 @@ jobs:
             "resp.exe",
             "Qt5Charts.dll",
             "python38.dll",
-            "platforms\qwindows.dll"
+            "platforms\qwindows.dll",
+            "QtQuick.2\qtquick2plugin.dll",
+            "QtQuick\Controls\qmldir",
+            "QtCharts\qmldir"
           )
           foreach ($item in $requiredDeployment) {
             if (-not (Test-Path -LiteralPath (Join-Path $stage $item))) {
@@ -273,26 +264,43 @@ jobs:
             }
           }
 
-          # QML imports are validated by the smoke test against the deployed runtime.
-          if (-not (Test-Path -LiteralPath (Join-Path $stage "qml"))) {
-            Write-Output "::error title=Deployment incomplete::Missing QML runtime directory"
-            exit 1
-          }
-
           Copy-Item "LICENSE" $stage
 
       - name: Smoke test deployment
         shell: pwsh
         env:
           QT_OPENGL: software
+          QT_ASSUME_STDERR_HAS_CONSOLE: "1"
         run: |
           $ErrorActionPreference = "Stop"
           $exe = Join-Path $env:GITHUB_WORKSPACE "build\windows\installer\resources\resp.exe"
-          $process = Start-Process -FilePath $exe -PassThru
-          Start-Sleep -Seconds 15
-          if ($process.HasExited) {
-            throw "RESP exited during the deployment smoke test with code $($process.ExitCode)."
+          $stdout = Join-Path $env:RUNNER_TEMP "resp-smoke-stdout.log"
+          $stderr = Join-Path $env:RUNNER_TEMP "resp-smoke-stderr.log"
+          $process = Start-Process `
+            -FilePath $exe `
+            -RedirectStandardOutput $stdout `
+            -RedirectStandardError $stderr `
+            -PassThru
+
+          $deadline = (Get-Date).AddSeconds(30)
+          do {
+            Start-Sleep -Seconds 1
+            $process.Refresh()
+            if ($process.HasExited) {
+              throw "RESP exited during the smoke test with code $($process.ExitCode)."
+            }
+          } while ($process.MainWindowHandle -eq 0 -and (Get-Date) -lt $deadline)
+
+          $fatalLog = Select-String `
+            -Path $stderr `
+            -Pattern "QQmlApplicationEngine failed to load component|plugin cannot be loaded for module" `
+            -ErrorAction SilentlyContinue
+          if ($fatalLog -or $process.MainWindowHandle -eq 0) {
+            Stop-Process -Id $process.Id -Force
+            Get-Content $stderr -Tail 200
+            throw "RESP did not create a usable main window during the smoke test."
           }
+
           Stop-Process -Id $process.Id -Force
 
       - name: Create portable ZIP
