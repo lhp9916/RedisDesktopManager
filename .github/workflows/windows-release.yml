@@ -300,11 +300,27 @@ jobs:
           if ($fatalLog -or -not $platformLoaded) {
             Stop-Process -Id $process.Id -Force
             Get-Content $stderr -Tail 200
-            Write-Output "::error title=RESP smoke test failed::QML failed to load or the Windows platform plugin was not loaded."
+            $details = if ($fatalLog) {
+              ($fatalLog | Select-Object -First 12 | ForEach-Object { $_.Line }) -join " | "
+            } else {
+              "Windows platform plugin load message was not found."
+            }
+            $details = $details.Replace("%", "%25").Replace("`r", "").Replace("`n", "%0A")
+            Write-Output "::error title=RESP smoke test failed::$details"
             exit 1
           }
 
           Stop-Process -Id $process.Id -Force
+
+      - name: Upload smoke test logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: RESP-${{ steps.version.outputs.app_version }}-smoke-logs
+          path: |
+            ${{ runner.temp }}/resp-smoke-stdout.log
+            ${{ runner.temp }}/resp-smoke-stderr.log
+          if-no-files-found: ignore
 
       - name: Create portable ZIP
         shell: pwsh
