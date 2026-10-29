@@ -73,8 +73,8 @@ jobs:
           version: ${{ env.QT_VERSION }}
           arch: win64_msvc2019_64
           modules: qtcharts
-          archives: qtbase qtdeclarative qtquickcontrols qtquickcontrols2 qttools qtsvg qtimageformats
           cache: true
+          cache-key-prefix: qt-5.15.2-full
 
       - name: Set up MSVC
         uses: ilammy/msvc-dev-cmd@v1
@@ -242,6 +242,18 @@ jobs:
           } finally {
             Pop-Location
           }
+
+          $qtRoot = Split-Path (Split-Path (Get-Command qmake).Source -Parent) -Parent
+          $qmlSource = Join-Path $qtRoot "qml"
+          if (-not (Test-Path -LiteralPath $qmlSource)) {
+            Write-Output "::error title=Qt deployment failed::Qt QML modules were not installed"
+            exit 1
+          }
+
+          Get-ChildItem (Join-Path $qtRoot "bin") -Filter "Qt5*.dll" -File |
+            Copy-Item -Destination $stage -Force
+          New-Item -ItemType Directory -Path "$stage\qml" -Force | Out-Null
+          Copy-Item "$qmlSource\*" "$stage\qml" -Recurse -Force
 
       - name: Verify deployment
         shell: pwsh
