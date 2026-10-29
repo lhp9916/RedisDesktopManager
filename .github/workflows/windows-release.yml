@@ -189,7 +189,7 @@ jobs:
             Pop-Location
           }
 
-      - name: Prepare deployment directory
+      - name: Stage application and Python packages
         shell: pwsh
         env:
           DISTUTILS_USE_SDK: "1"
@@ -210,12 +210,25 @@ jobs:
             exit 1
           }
 
+      - name: Bundle Python runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $stage = Join-Path $env:GITHUB_WORKSPACE "build\windows\installer\resources"
+
           Copy-Item "$env:pythonLocation\python38.dll" $stage -Force
           Get-ChildItem "$env:pythonLocation" -Filter "*.dll" -File |
             Copy-Item -Destination $stage -Force
-          Copy-Item "$env:pythonLocation\DLLs" $stage -Recurse -Force
-          Copy-Item "$env:pythonLocation\Lib" $stage -Recurse -Force
+          New-Item -ItemType Directory -Path "$stage\DLLs" -Force | Out-Null
+          Copy-Item "$env:pythonLocation\DLLs\*" "$stage\DLLs" -Recurse -Force
+          New-Item -ItemType Directory -Path "$stage\Lib" -Force | Out-Null
+          Copy-Item "$env:pythonLocation\Lib\*" "$stage\Lib" -Recurse -Force
 
+      - name: Deploy Qt runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $stage = Join-Path $env:GITHUB_WORKSPACE "build\windows\installer\resources"
           Push-Location $stage
           try {
             windeployqt `
@@ -230,6 +243,11 @@ jobs:
             Pop-Location
           }
 
+      - name: Verify deployment
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $stage = Join-Path $env:GITHUB_WORKSPACE "build\windows\installer\resources"
           $requiredDeployment = @(
             "resp.exe",
             "Qt5Charts.dll",
