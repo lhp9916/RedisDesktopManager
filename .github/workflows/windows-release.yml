@@ -219,6 +219,13 @@ jobs:
           Copy-Item "$env:pythonLocation\python38.dll" $stage -Force
           Get-ChildItem "$env:pythonLocation" -Filter "*.dll" -File |
             Copy-Item -Destination $stage -Force
+          foreach ($directory in @($env:pythonLocation, "$env:pythonLocation\DLLs")) {
+            if (Test-Path -LiteralPath $directory) {
+              Get-ChildItem $directory -File |
+                Where-Object { $_.Name -match '^(libssl|libcrypto)-.*\.dll$' } |
+                Copy-Item -Destination $stage -Force
+            }
+          }
           New-Item -ItemType Directory -Path "$stage\DLLs" -Force | Out-Null
           Copy-Item "$env:pythonLocation\DLLs\*" "$stage\DLLs" -Recurse -Force
           New-Item -ItemType Directory -Path "$stage\Lib" -Force | Out-Null
@@ -252,6 +259,8 @@ jobs:
             "resp.exe",
             "Qt5Charts.dll",
             "python38.dll",
+            "libssl-1_1.dll",
+            "libcrypto-1_1.dll",
             "platforms\qwindows.dll",
             "QtQuick.2\qtquick2plugin.dll",
             "QtQuick\Controls\qmldir",
@@ -298,11 +307,17 @@ jobs:
             -Path $stderr `
             -Pattern "loaded library .*qwindows.dll" `
             -ErrorAction SilentlyContinue
-          if ($fatalLog -or -not $platformLoaded) {
+          $tlsLoaded = Select-String `
+            -Path $stderr `
+            -Pattern 'TLS support: "(?!")[^"]+"' `
+            -ErrorAction SilentlyContinue
+          if ($fatalLog -or -not $platformLoaded -or -not $tlsLoaded) {
             Stop-Process -Id $process.Id -Force
             Get-Content $stderr -Tail 200
             $details = if ($fatalLog) {
               ($fatalLog | Select-Object -First 12 | ForEach-Object { $_.Line }) -join " | "
+            } elseif (-not $tlsLoaded) {
+              "OpenSSL did not load. TLS support is empty."
             } else {
               "Windows platform plugin load message was not found."
             }
