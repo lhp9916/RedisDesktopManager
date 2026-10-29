@@ -178,14 +178,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          Push-Location "3rdparty\qredisclient\3rdparty\hiredis"
-          try {
-            git apply --ignore-space-change --ignore-whitespace ..\hiredis-win.patch
-            if ($LASTEXITCODE -ne 0) { throw "Could not apply the hiredis Windows patch" }
-          } finally {
-            Pop-Location
-          }
-
+          # This qredisclient revision compiles its bundled hiredis sources directly.
           Push-Location "src"
           try {
             qmake CONFIG+=release "VERSION=${{ steps.version.outputs.app_version }}"
