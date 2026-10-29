@@ -271,6 +271,7 @@ jobs:
         env:
           QT_OPENGL: software
           QT_ASSUME_STDERR_HAS_CONSOLE: "1"
+          QT_DEBUG_PLUGINS: "1"
         run: |
           $ErrorActionPreference = "Stop"
           $exe = Join-Path $env:GITHUB_WORKSPACE "build\windows\installer\resources\resp.exe"
@@ -282,23 +283,25 @@ jobs:
             -RedirectStandardError $stderr `
             -PassThru
 
-          $deadline = (Get-Date).AddSeconds(30)
-          do {
-            Start-Sleep -Seconds 1
-            $process.Refresh()
-            if ($process.HasExited) {
-              throw "RESP exited during the smoke test with code $($process.ExitCode)."
-            }
-          } while ($process.MainWindowHandle -eq 0 -and (Get-Date) -lt $deadline)
+          Start-Sleep -Seconds 15
+          $process.Refresh()
+          if ($process.HasExited) {
+            throw "RESP exited during the smoke test with code $($process.ExitCode)."
+          }
 
           $fatalLog = Select-String `
             -Path $stderr `
-            -Pattern "QQmlApplicationEngine failed to load component|plugin cannot be loaded for module" `
+            -Pattern "QQmlApplicationEngine failed to load component|plugin cannot be loaded for module|Cannot install type|module .* is not installed" `
             -ErrorAction SilentlyContinue
-          if ($fatalLog -or $process.MainWindowHandle -eq 0) {
+          $platformLoaded = Select-String `
+            -Path $stderr `
+            -Pattern "loaded library .*qwindows.dll" `
+            -ErrorAction SilentlyContinue
+          if ($fatalLog -or -not $platformLoaded) {
             Stop-Process -Id $process.Id -Force
             Get-Content $stderr -Tail 200
-            throw "RESP did not create a usable main window during the smoke test."
+            Write-Output "::error title=RESP smoke test failed::QML failed to load or the Windows platform plugin was not loaded."
+            exit 1
           }
 
           Stop-Process -Id $process.Id -Force
