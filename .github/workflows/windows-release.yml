@@ -226,6 +226,12 @@ jobs:
                 Copy-Item -Destination $stage -Force
             }
           }
+          foreach ($name in @("libssl-1_1", "libcrypto-1_1")) {
+            $source = Join-Path $stage "$name.dll"
+            if (Test-Path -LiteralPath $source) {
+              Copy-Item -LiteralPath $source -Destination (Join-Path $stage "$name-x64.dll") -Force
+            }
+          }
           New-Item -ItemType Directory -Path "$stage\DLLs" -Force | Out-Null
           Copy-Item "$env:pythonLocation\DLLs\*" "$stage\DLLs" -Recurse -Force
           New-Item -ItemType Directory -Path "$stage\Lib" -Force | Out-Null
@@ -261,6 +267,8 @@ jobs:
             "python38.dll",
             "libssl-1_1.dll",
             "libcrypto-1_1.dll",
+            "libssl-1_1-x64.dll",
+            "libcrypto-1_1-x64.dll",
             "platforms\qwindows.dll",
             "QtQuick.2\qtquick2plugin.dll",
             "QtQuick\Controls\qmldir",
