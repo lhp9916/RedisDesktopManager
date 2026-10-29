@@ -252,14 +252,19 @@ jobs:
             "resp.exe",
             "Qt5Charts.dll",
             "python38.dll",
-            "platforms\qwindows.dll",
-            "qml\QtQuick\Controls\qmldir",
-            "qml\QtCharts\qmldir"
+            "platforms\qwindows.dll"
           )
           foreach ($item in $requiredDeployment) {
             if (-not (Test-Path -LiteralPath (Join-Path $stage $item))) {
-              throw "Deployment is missing: $item"
+              Write-Output "::error title=Deployment incomplete::Missing required file: $item"
+              exit 1
             }
+          }
+
+          # QML imports are validated by the smoke test against the deployed runtime.
+          if (-not (Test-Path -LiteralPath (Join-Path $stage "qml"))) {
+            Write-Output "::error title=Deployment incomplete::Missing QML runtime directory"
+            exit 1
           }
 
           Copy-Item "LICENSE" $stage
