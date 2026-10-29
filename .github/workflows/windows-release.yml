@@ -1,0 +1,328 @@
+name: Build Windows Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag, for example v2022.0.1 (leave empty for an automatic version)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  QT_VERSION: "5.15.2"
+
+jobs:
+  build-windows:
+    name: Windows x64
+    runs-on: windows-2022
+    timeout-minutes: 120
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Set release version
+        id: version
+        shell: pwsh
+        env:
+          REQUESTED_RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          $requested = "$env:REQUESTED_RELEASE_TAG".Trim()
+          if (-not [string]::IsNullOrWhiteSpace($requested)) {
+            $tag = $requested
+          } elseif ($env:GITHUB_REF_TYPE -eq "tag") {
+            $tag = $env:GITHUB_REF_NAME
+          } else {
+            $tag = "v2022.0.$env:GITHUB_RUN_NUMBER"
+          }
+
+          if (-not $tag.StartsWith("v")) {
+            $tag = "v$tag"
+          }
+          if ($tag -notmatch '^v\d+(\.\d+){0,2}([-.][0-9A-Za-z][0-9A-Za-z.-]*)?$') {
+            throw "Release tag '$tag' is not a supported version tag."
+          }
+
+          # NSIS requires a numeric x.y.z version for the executable metadata.
+          $base = $tag.TrimStart("v").Split("-")[0]
+          $parts = @($base.Split(".") | Where-Object { $_ -match "^\d+$" })
+          if ($parts.Count -lt 1) {
+            throw "Release tag '$tag' does not contain a numeric version."
+          }
+          while ($parts.Count -lt 3) {
+            $parts += "0"
+          }
+          $numericVersion = ($parts | Select-Object -First 3) -join "."
+
+          "release_tag=$tag" >> $env:GITHUB_OUTPUT
+          "app_version=$($tag.TrimStart('v'))" >> $env:GITHUB_OUTPUT
+          "numeric_version=$numericVersion" >> $env:GITHUB_OUTPUT
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: win64_msvc2019_64
+          modules: qtcharts
+          archives: qtbase qtdeclarative qtquickcontrols qtquickcontrols2 qttools qtsvg qtimageformats
+          cache: true
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.8"
+          architecture: x64
+
+      - name: Prepare Python build path
+        shell: pwsh
+        run: |
+          # The 2022 qmake project links against C:\Python38-x64.
+          if (Test-Path -LiteralPath "C:\Python38-x64") {
+            Remove-Item -LiteralPath "C:\Python38-x64" -Recurse -Force
+          }
+          New-Item -ItemType Junction -Path "C:\Python38-x64" -Target $env:pythonLocation
+          python --version
+          python -m pip install "pip==24.0" "setuptools<76" wheel
+
+      - name: Build third-party libraries
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $cmakePolicy = "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
+          $generator = "Visual Studio 17 2022"
+
+          Invoke-WebRequest `
+            -Uri "https://www.nuget.org/api/v2/package/zlib-msvc14-x64/1.2.11.7795" `
+            -OutFile "$env:RUNNER_TEMP\zlib.zip"
+          Expand-Archive `
+            -LiteralPath "$env:RUNNER_TEMP\zlib.zip" `
+            -DestinationPath "3rdparty\zlib-msvc14-x64.1.2.11.7795"
+
+          Push-Location "3rdparty\lz4\build\cmake"
+          try {
+            cmake -G $generator -A x64 $cmakePolicy -DLZ4_BUNDLED_MODE=ON .
+            if ($LASTEXITCODE -ne 0) { throw "LZ4 configure failed" }
+            cmake --build . --config Release --parallel
+            if ($LASTEXITCODE -ne 0) { throw "LZ4 build failed" }
+          } finally {
+            Pop-Location
+          }
+
+          Push-Location "3rdparty\zstd\build\cmake"
+          try {
+            cmake -G $generator -A x64 $cmakePolicy `
+              -DZSTD_BUILD_PROGRAMS=OFF `
+              -DZSTD_BUILD_SHARED=OFF `
+              -DZSTD_BUILD_STATIC=ON `
+              -DZSTD_BUILD_TESTS=OFF .
+            if ($LASTEXITCODE -ne 0) { throw "Zstandard configure failed" }
+            cmake --build . --config Release --parallel
+            if ($LASTEXITCODE -ne 0) { throw "Zstandard build failed" }
+          } finally {
+            Pop-Location
+          }
+
+          Push-Location "3rdparty\snappy"
+          try {
+            cmake -G $generator -A x64 $cmakePolicy `
+              -DSNAPPY_BUILD_TESTS=OFF `
+              -DSNAPPY_BUILD_BENCHMARKS=OFF .
+            if ($LASTEXITCODE -ne 0) { throw "Snappy configure failed" }
+            cmake --build . --config Release --parallel
+            if ($LASTEXITCODE -ne 0) { throw "Snappy build failed" }
+          } finally {
+            Pop-Location
+          }
+
+          Push-Location "3rdparty\brotli"
+          try {
+            cmake -G $generator -A x64 $cmakePolicy -DBUILD_SHARED_LIBS=OFF .
+            if ($LASTEXITCODE -ne 0) { throw "Brotli configure failed" }
+            cmake --build . --config Release --parallel
+            if ($LASTEXITCODE -ne 0) { throw "Brotli build failed" }
+          } finally {
+            Pop-Location
+          }
+
+          $requiredLibraries = @(
+            "3rdparty\zlib-msvc14-x64.1.2.11.7795\build\native\lib_release\zlibstatic.lib",
+            "3rdparty\lz4\build\cmake\Release\lz4.lib",
+            "3rdparty\zstd\build\cmake\lib\Release\zstd_static.lib",
+            "3rdparty\snappy\Release\snappy.lib",
+            "3rdparty\brotli\Release\brotlicommon-static.lib",
+            "3rdparty\brotli\Release\brotlidec-static.lib",
+            "3rdparty\brotli\Release\brotlienc-static.lib"
+          )
+          foreach ($library in $requiredLibraries) {
+            if (-not (Test-Path -LiteralPath $library)) {
+              throw "Expected dependency was not built: $library"
+            }
+          }
+
+      - name: Build RESP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          Push-Location "3rdparty\qredisclient\3rdparty\hiredis"
+          try {
+            git apply --ignore-space-change --ignore-whitespace ..\hiredis-win.patch
+            if ($LASTEXITCODE -ne 0) { throw "Could not apply the hiredis Windows patch" }
+          } finally {
+            Pop-Location
+          }
+
+          Push-Location "src"
+          try {
+            qmake CONFIG+=release "VERSION=${{ steps.version.outputs.app_version }}"
+            if ($LASTEXITCODE -ne 0) { throw "qmake failed" }
+            nmake /S /NOLOGO release
+            if ($LASTEXITCODE -ne 0) { throw "RESP compilation failed" }
+          } finally {
+            Pop-Location
+          }
+
+      - name: Prepare deployment directory
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $stage = Join-Path $env:GITHUB_WORKSPACE "build\windows\installer\resources"
+          Get-ChildItem -LiteralPath $stage -Force | Remove-Item -Recurse -Force
+
+          Copy-Item "bin\windows\release\resp.exe" $stage
+          python -m pip install --target $stage -r "src\py\requirements.txt"
+          if ($LASTEXITCODE -ne 0) { throw "Python dependencies failed to install" }
+
+          Copy-Item "$env:pythonLocation\python38.dll" $stage -Force
+          Get-ChildItem "$env:pythonLocation" -Filter "*.dll" -File |
+            Copy-Item -Destination $stage -Force
+          Copy-Item "$env:pythonLocation\DLLs" $stage -Recurse -Force
+          Copy-Item "$env:pythonLocation\Lib" $stage -Recurse -Force
+
+          Push-Location $stage
+          try {
+            windeployqt `
+              --release `
+              --compiler-runtime `
+              --no-translations `
+              --force `
+              --qmldir "$env:GITHUB_WORKSPACE\src\qml" `
+              "resp.exe"
+            if ($LASTEXITCODE -ne 0) { throw "windeployqt failed" }
+          } finally {
+            Pop-Location
+          }
+
+          $requiredDeployment = @(
+            "resp.exe",
+            "Qt5Charts.dll",
+            "python38.dll",
+            "platforms\qwindows.dll",
+            "qml\QtQuick\Controls\qmldir",
+            "qml\QtCharts\qmldir"
+          )
+          foreach ($item in $requiredDeployment) {
+            if (-not (Test-Path -LiteralPath (Join-Path $stage $item))) {
+              throw "Deployment is missing: $item"
+            }
+          }
+
+          Copy-Item "LICENSE" $stage
+
+      - name: Smoke test deployment
+        shell: pwsh
+        env:
+          QT_OPENGL: software
+        run: |
+          $ErrorActionPreference = "Stop"
+          $exe = Join-Path $env:GITHUB_WORKSPACE "build\windows\installer\resources\resp.exe"
+          $process = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 15
+          if ($process.HasExited) {
+            throw "RESP exited during the deployment smoke test with code $($process.ExitCode)."
+          }
+          Stop-Process -Id $process.Id -Force
+
+      - name: Create portable ZIP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = "${{ steps.version.outputs.app_version }}"
+          $releaseDir = Join-Path $env:GITHUB_WORKSPACE "release"
+          $portableDir = Join-Path $env:RUNNER_TEMP "RESP-$version-windows-x64"
+          New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
+          New-Item -ItemType Directory -Path $portableDir -Force | Out-Null
+          Copy-Item "build\windows\installer\resources\*" $portableDir -Recurse
+          Compress-Archive `
+            -Path $portableDir `
+            -DestinationPath (Join-Path $releaseDir "RESP-$version-windows-x64-portable.zip") `
+            -CompressionLevel Optimal
+
+      - name: Create installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = "${{ steps.version.outputs.app_version }}"
+          $numericVersion = "${{ steps.version.outputs.numeric_version }}"
+          $makensis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+          if (-not (Test-Path -LiteralPath $makensis)) {
+            choco install nsis --no-progress -y
+            $makensis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+          }
+
+          & $makensis /V2 "/DVERSION=$numericVersion" "build\windows\installer\installer.nsi"
+          if ($LASTEXITCODE -ne 0) { throw "NSIS installer build failed" }
+
+          $installer = Join-Path $env:GITHUB_WORKSPACE "build\windows\installer\resp-$numericVersion.exe"
+          if (-not (Test-Path -LiteralPath $installer)) {
+            throw "Expected installer was not created: $installer"
+          }
+          Copy-Item `
+            $installer `
+            (Join-Path $env:GITHUB_WORKSPACE "release\RESP-$version-windows-x64-setup.exe")
+
+      - name: Generate checksums
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $lines = Get-ChildItem "release" -File |
+            Where-Object { $_.Name -ne "SHA256SUMS.txt" } |
+            Sort-Object Name |
+            ForEach-Object {
+              $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLowerInvariant()
+              "$hash  $($_.Name)"
+            }
+          $lines | Set-Content "release\SHA256SUMS.txt" -Encoding ascii
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: RESP-${{ steps.version.outputs.app_version }}-windows-x64
+          path: release/*
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.release_tag }}
+          target_commitish: ${{ github.sha }}
+          name: RESP ${{ steps.version.outputs.release_tag }}
+          generate_release_notes: true
+          files: |
+            release/RESP-${{ steps.version.outputs.app_version }}-windows-x64-setup.exe
+            release/RESP-${{ steps.version.outputs.app_version }}-windows-x64-portable.zip
+            release/SHA256SUMS.txt
