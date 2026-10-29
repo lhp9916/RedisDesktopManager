@@ -191,14 +191,24 @@ jobs:
 
       - name: Prepare deployment directory
         shell: pwsh
+        env:
+          DISTUTILS_USE_SDK: "1"
+          MSSdk: "1"
         run: |
           $ErrorActionPreference = "Stop"
           $stage = Join-Path $env:GITHUB_WORKSPACE "build\windows\installer\resources"
           Get-ChildItem -LiteralPath $stage -Force | Remove-Item -Recurse -Force
 
           Copy-Item "bin\windows\release\resp.exe" $stage
-          python -m pip install --target $stage -r "src\py\requirements.txt"
-          if ($LASTEXITCODE -ne 0) { throw "Python dependencies failed to install" }
+          $pipLog = Join-Path $env:RUNNER_TEMP "python-dependencies.log"
+          python -m pip install --target $stage -r "src\py\requirements.txt" 2>&1 |
+            Tee-Object -FilePath $pipLog
+          if ($LASTEXITCODE -ne 0) {
+            $details = (Get-Content $pipLog -Tail 8) -join " | "
+            $details = $details.Replace("%", "%25").Replace("`r", "").Replace("`n", "%0A")
+            Write-Output "::error title=Python dependency installation failed::$details"
+            exit 1
+          }
 
           Copy-Item "$env:pythonLocation\python38.dll" $stage -Force
           Get-ChildItem "$env:pythonLocation" -Filter "*.dll" -File |
