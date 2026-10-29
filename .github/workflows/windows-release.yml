@@ -274,6 +274,7 @@ jobs:
           QT_DEBUG_PLUGINS: "1"
         run: |
           $ErrorActionPreference = "Stop"
+          Remove-Item Env:QML2_IMPORT_PATH,Env:QML_IMPORT_PATH,Env:QT_PLUGIN_PATH,Env:QT_QPA_PLATFORM_PLUGIN_PATH -ErrorAction SilentlyContinue
           $exe = Join-Path $env:GITHUB_WORKSPACE "build\windows\installer\resources\resp.exe"
           $stdout = Join-Path $env:RUNNER_TEMP "resp-smoke-stdout.log"
           $stderr = Join-Path $env:RUNNER_TEMP "resp-smoke-stderr.log"
