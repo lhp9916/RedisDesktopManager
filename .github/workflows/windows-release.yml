@@ -350,7 +350,7 @@ jobs:
             -ErrorAction SilentlyContinue
           $translationLoaded = Select-String `
             -Path $stderr `
-            -Pattern "Load translations file for locale: zh_CN" `
+            -Pattern 'Load translations file for locale:\s+"?zh_CN"?' `
             -ErrorAction SilentlyContinue
           if ($fatalLog -or -not $platformLoaded -or -not $tlsLoaded -or -not $translationLoaded) {
             Stop-Process -Id $process.Id -Force
