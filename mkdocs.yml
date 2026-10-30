@@ -19,6 +19,7 @@ nav:
 - Known Issues: 'known-issues.md'
 - AppStore Limitations: 'app-store.md'
 - Development Guide: 'development.md'
+- Fork Changes: 'fork-changes.md'
 markdown_extensions:
   - markdown.extensions.admonition
 plugins:
