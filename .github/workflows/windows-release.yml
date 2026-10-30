@@ -228,6 +228,15 @@ jobs:
             exit 1
           }
 
+      - name: Deploy translations
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $stage = Join-Path $env:GITHUB_WORKSPACE "build\windows\installer\resources"
+          $translationDir = Join-Path $stage "translations"
+          New-Item -ItemType Directory -Path $translationDir -Force | Out-Null
+          Copy-Item "src\resources\translations\*.qm" $translationDir -Force
+
       - name: Bundle Python runtime
         shell: pwsh
         run: |
@@ -287,6 +296,7 @@ jobs:
             "libcrypto-1_1.dll",
             "libssl-1_1-x64.dll",
             "libcrypto-1_1-x64.dll",
+            "translations\rdm_zh_CN.qm",
             "platforms\qwindows.dll",
             "QtQuick.2\qtquick2plugin.dll",
             "QtQuick\Controls\qmldir",

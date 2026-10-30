@@ -7,6 +7,7 @@
 #include <QNetworkProxyFactory>
 #include <QQmlContext>
 #include <QQuickWindow>
+#include <QDir>
 #include <QSettings>
 #include <QSysInfo>
 #include <QUrl>
@@ -362,7 +363,11 @@ void Application::installTranslator() {
   }
 
   m_translator = QSharedPointer<QTranslator>(new QTranslator((QObject*)this));
-  if (m_translator->load(QString(":/translations/rdm_") + locale)) {
+  const QString translationName = QString("rdm_") + locale;
+  const QString externalTranslation =
+      QDir(applicationDirPath()).filePath("translations/" + translationName);
+  if (m_translator->load(externalTranslation) ||
+      m_translator->load(QString(":/translations/") + translationName)) {
     qDebug() << "Load translations file for locale:" << locale;
     QCoreApplication::installTranslator(m_translator.data());
   } else {
