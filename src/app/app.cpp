@@ -345,7 +345,10 @@ void Application::initPython() {
 
 void Application::installTranslator() {
   QSettings settings;
-  QString preferredLocale = settings.value("app/locale", "system").toString();
+  QString preferredLocale = qEnvironmentVariable("RESP_UI_LOCALE");
+  if (preferredLocale.isEmpty()) {
+    preferredLocale = settings.value("app/locale", "system").toString();
+  }
 
   QString locale;
 

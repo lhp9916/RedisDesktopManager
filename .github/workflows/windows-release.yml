@@ -317,15 +317,13 @@ jobs:
           QT_OPENGL: software
           QT_ASSUME_STDERR_HAS_CONSOLE: "1"
           QT_DEBUG_PLUGINS: "1"
+          RESP_UI_LOCALE: zh_CN
         run: |
           $ErrorActionPreference = "Stop"
           Remove-Item Env:QML2_IMPORT_PATH,Env:QML_IMPORT_PATH,Env:QT_PLUGIN_PATH,Env:QT_QPA_PLATFORM_PLUGIN_PATH -ErrorAction SilentlyContinue
           $exe = Join-Path $env:GITHUB_WORKSPACE "build\windows\installer\resources\resp.exe"
           $stdout = Join-Path $env:RUNNER_TEMP "resp-smoke-stdout.log"
           $stderr = Join-Path $env:RUNNER_TEMP "resp-smoke-stderr.log"
-          $settingsPath = "HKCU:\Software\redisdesktop\RESP.app - Developer GUI for Redis\app"
-          New-Item -Path $settingsPath -Force | Out-Null
-          Set-ItemProperty -Path $settingsPath -Name "locale" -Value "zh_CN"
           $process = Start-Process `
             -FilePath $exe `
             -RedirectStandardOutput $stdout `
