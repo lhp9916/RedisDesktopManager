@@ -178,6 +178,24 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
+          $translationSources = @(Get-ChildItem "src\resources\translations" -Filter "*.ts" -File |
+            ForEach-Object { $_.FullName })
+          & lrelease @translationSources
+          if ($LASTEXITCODE -ne 0) { throw "Translation compilation failed" }
+
+          foreach ($translation in @(
+            "rdm.qm",
+            "rdm_zh_CN.qm",
+            "rdm_zh_TW.qm",
+            "rdm_es_ES.qm",
+            "rdm_ja_JP.qm",
+            "rdm_uk_UA.qm"
+          )) {
+            if (-not (Test-Path -LiteralPath (Join-Path "src\resources\translations" $translation))) {
+              throw "Expected translation was not compiled: $translation"
+            }
+          }
+
           # This qredisclient revision compiles its bundled hiredis sources directly.
           Push-Location "src"
           try {
@@ -295,6 +313,9 @@ jobs:
           $exe = Join-Path $env:GITHUB_WORKSPACE "build\windows\installer\resources\resp.exe"
           $stdout = Join-Path $env:RUNNER_TEMP "resp-smoke-stdout.log"
           $stderr = Join-Path $env:RUNNER_TEMP "resp-smoke-stderr.log"
+          $settingsPath = "HKCU:\Software\redisdesktop\RESP.app - Developer GUI for Redis\app"
+          New-Item -Path $settingsPath -Force | Out-Null
+          Set-ItemProperty -Path $settingsPath -Name "locale" -Value "zh_CN"
           $process = Start-Process `
             -FilePath $exe `
             -RedirectStandardOutput $stdout `
@@ -319,11 +340,17 @@ jobs:
             -Path $stderr `
             -Pattern 'TLS support: "(?!")[^"]+"' `
             -ErrorAction SilentlyContinue
-          if ($fatalLog -or -not $platformLoaded -or -not $tlsLoaded) {
+          $translationLoaded = Select-String `
+            -Path $stderr `
+            -Pattern "Load translations file for locale: zh_CN" `
+            -ErrorAction SilentlyContinue
+          if ($fatalLog -or -not $platformLoaded -or -not $tlsLoaded -or -not $translationLoaded) {
             Stop-Process -Id $process.Id -Force
             Get-Content $stderr -Tail 200
             $details = if ($fatalLog) {
               ($fatalLog | Select-Object -First 12 | ForEach-Object { $_.Line }) -join " | "
+            } elseif (-not $translationLoaded) {
+              "Chinese translation was not loaded."
             } elseif (-not $tlsLoaded) {
               "OpenSSL did not load. TLS support is empty."
             } else {
